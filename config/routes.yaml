@@ -1,0 +1,8 @@
+# Load routes from controller attributes
+controllers:
+    resource:
+        path: ../src/Controller/
+        namespace: App\Controller
+    type: attribute
+
+# Additional routes can be configured here
