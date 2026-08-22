@@ -8,18 +8,31 @@ use App\Model\DocumentChunk;
 class FAQGeneratorService
 {
     private ChunkRetrieverService $retriever;
+    private int $topK;
+    private float $similarityThreshold;
 
-    public function __construct(ChunkRetrieverService $retriever)
+    public function __construct(
+        ChunkRetrieverService $retriever,
+        int $topK = 3,
+        float $similarityThreshold = 0.0
+    )
     {
         $this->retriever = $retriever;
+        $this->topK = $topK;
+        $this->similarityThreshold = $similarityThreshold;
     }
 
-    public function generateFAQs(array $chunks, array $questions): array
+    public function generateFAQs(
+        array $chunks, 
+        array $questions,
+        ?int $topK = null,
+        ?float $similarityThreshold = null
+    ): array
     {
         $faqs = [];
         
         foreach ($questions as $question) {
-            $faq = $this->generateSingleFAQ($chunks, $question);
+            $faq = $this->generateSingleFAQ($chunks, $question, $topK, $similarityThreshold);
             if ($faq !== null) {
                 $faqs[] = $faq;
             }
@@ -28,9 +41,17 @@ class FAQGeneratorService
         return $faqs;
     }
 
-    public function generateSingleFAQ(array $chunks, string $question): ?FAQItem
+    public function generateSingleFAQ(
+        array $chunks, 
+        string $question,
+        ?int $topK = null,
+        ?float $similarityThreshold = null
+    ): ?FAQItem
     {
-        $relevantChunks = $this->retriever->findRelevantChunks($chunks, $question, 3);
+        $k = $topK ?? $this->topK;
+        $threshold = $similarityThreshold ?? $this->similarityThreshold;
+        
+        $relevantChunks = $this->retriever->findRelevantChunks($chunks, $question, $k, $threshold);
         
         if (empty($relevantChunks)) {
             return null;

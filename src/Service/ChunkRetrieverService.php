@@ -3,10 +3,58 @@
 namespace App\Service;
 
 use App\Model\DocumentChunk;
+use App\Exception\VectorStoreException;
 
 class ChunkRetrieverService
 {
-    public function findRelevantChunks(array $allChunks, string $query, int $topK = 3): array
+    private ?VectorStore $vectorStore = null;
+    private float $similarityThreshold;
+    private bool $useSemanticRetrieval;
+
+    public function __construct(
+        float $similarityThreshold = 0.0,
+        bool $useSemanticRetrieval = true
+    ) {
+        $this->similarityThreshold = $similarityThreshold;
+        $this->useSemanticRetrieval = $useSemanticRetrieval;
+    }
+
+    public function setVectorStore(VectorStore $vectorStore): void
+    {
+        $this->vectorStore = $vectorStore;
+    }
+
+    public function findRelevantChunks(
+        array $allChunks, 
+        string $query, 
+        int $topK = 3,
+        ?float $similarityThreshold = null
+    ): array {
+        if (empty($query)) {
+            return [];
+        }
+
+        if (empty($allChunks)) {
+            return [];
+        }
+
+        $threshold = $similarityThreshold ?? $this->similarityThreshold;
+
+        // Use semantic retrieval if vector store is available
+        if ($this->useSemanticRetrieval && $this->vectorStore !== null) {
+            try {
+                return $this->vectorStore->search($query, $topK, $threshold);
+            } catch (VectorStoreException $e) {
+                // Fall back to keyword-based retrieval on error
+                return $this->keywordBasedRetrieval($allChunks, $query, $topK);
+            }
+        }
+
+        // Fall back to keyword-based retrieval
+        return $this->keywordBasedRetrieval($allChunks, $query, $topK);
+    }
+
+    private function keywordBasedRetrieval(array $allChunks, string $query, int $topK): array
     {
         $scoredChunks = [];
         
