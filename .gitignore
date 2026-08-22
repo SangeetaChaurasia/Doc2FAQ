@@ -1,0 +1,28 @@
+# Environment files
+.env.local
+.env.local.php
+.env.*.local
+
+# Vendor
+/vendor/
+
+# Cache and logs
+/var/cache/*
+/var/log/*
+!/var/cache/.gitkeep
+!/var/log/.gitkeep
+
+# Build data
+/public/bundles/
+
+# Composer
+composer.phar
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
