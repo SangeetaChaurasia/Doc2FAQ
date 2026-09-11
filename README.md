@@ -1,6 +1,6 @@
 # Doc2FAQ
 
-A Symfony-based PHP web application for document-to-FAQ conversion with source citation tracking. The application processes documents, splits them into chunks with metadata preservation, and generates FAQs with transparent source references.
+A Symfony-based PHP web application for document-to-FAQ conversion with semantic retrieval and source citation tracking. The application processes documents, splits them into chunks with metadata preservation, uses semantic similarity to find relevant content, and generates FAQs with transparent source references.
 
 ## Requirements
 
@@ -51,6 +51,45 @@ You can generate a secure random secret using:
 ```bash
 php -r "echo bin2hex(random_bytes(32));"
 ```
+
+### 4. Configure Semantic Retrieval (Optional)
+
+The application includes configurable semantic retrieval. You can adjust parameters in `config/services.yaml`:
+
+```yaml
+parameters:
+    # Semantic Retrieval Configuration
+    retrieval.embedding_model: 'simple'        # Embedding model to use
+    retrieval.vector_store: 'memory'           # Vector store type
+    retrieval.top_k: 3                         # Number of chunks to retrieve
+    retrieval.similarity_threshold: 0.0        # Minimum similarity score (0.0-1.0)
+    retrieval.use_semantic: true               # Enable/disable semantic retrieval
+```
+
+#### Configuration Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `retrieval.embedding_model` | string | `simple` | Embedding model to use. Currently supports `simple` (built-in) |
+| `retrieval.vector_store` | string | `memory` | Vector store type. Currently supports `memory` (in-memory) |
+| `retrieval.top_k` | integer | `3` | Number of most relevant chunks to retrieve for each question |
+| `retrieval.similarity_threshold` | float | `0.0` | Minimum cosine similarity score (0.0-1.0). Higher values filter out less relevant chunks |
+| `retrieval.use_semantic` | boolean | `true` | Enable semantic retrieval. If `false`, falls back to keyword-based retrieval |
+
+#### Tuning Recommendations
+
+- **`top_k`**: 
+  - Increase (5-10) for complex questions requiring more context
+  - Decrease (1-2) for simple questions or to reduce LLM token usage
+  
+- **`similarity_threshold`**:
+  - Keep at `0.0` to retrieve all chunks regardless of similarity
+  - Increase (0.3-0.5) to filter out less relevant chunks
+  - Increase (0.6+) for strict relevance matching
+
+- **`use_semantic`**:
+  - Set to `true` (default) for semantic similarity-based retrieval
+  - Set to `false` to use simple keyword-based retrieval
 
 ## Running the Application
 
@@ -276,12 +315,100 @@ curl -X POST http://localhost:8000/api/faq/generate \
 
 ### Implementation Notes
 
-- The system uses semantic chunking to preserve context
+- The system uses **semantic retrieval** to find relevant document chunks
 - Chunk size is optimized at ~500 characters with 50-character overlap
 - Section headings are automatically detected (ALL CAPS or ending with ':')
 - Page numbers are tracked throughout the chunking process
-- The retrieval system ranks chunks by relevance to each question
+- The retrieval system uses **cosine similarity** to rank chunks by semantic relevance
 - Multiple source chunks may contribute to a single FAQ answer
+
+## Semantic Retrieval Architecture
+
+The Doc2FAQ system implements a semantic retrieval pipeline that finds the most relevant document chunks for each question using embedding-based similarity search.
+
+### How It Works
+
+1. **Document Indexing**
+   - Documents are split into chunks with metadata preservation
+   - Each chunk is converted into a numerical embedding vector
+   - Embeddings are stored in a vector store with chunk references
+
+2. **Query Processing**
+   - User questions are converted into embedding vectors
+   - The system performs semantic similarity search against indexed chunks
+   - Top-K most similar chunks are retrieved based on cosine similarity
+
+3. **FAQ Generation**
+   - Retrieved chunks are passed to the LLM as context
+   - Answers are generated based only on relevant chunks
+   - Source citations link answers back to specific chunks
+
+### Components
+
+#### Embedding Service
+
+**Interface**: `EmbeddingServiceInterface`
+
+Responsible for converting text into numerical vectors. The current implementation uses a simple hash-based approach suitable for development:
+
+- **SimpleEmbeddingService**: Built-in embedding using token hashing (128-dimensional vectors)
+- **Extensible**: Can be replaced with external APIs (OpenAI, Cohere, etc.)
+
+```php
+interface EmbeddingServiceInterface
+{
+    public function generateEmbedding(string $text): array;
+}
+```
+
+#### Vector Store
+
+**Class**: `VectorStore`
+
+Manages embedding storage and similarity search:
+
+- Indexes document chunks with their embeddings
+- Performs cosine similarity search
+- Returns top-K most similar chunks
+- Respects similarity thresholds
+- Preserves all chunk metadata
+
+```php
+// Index chunks
+$vectorStore->indexChunks($chunks);
+
+// Search for relevant chunks
+$relevant = $vectorStore->search($query, $topK = 3, $threshold = 0.0);
+```
+
+#### Chunk Retriever Service
+
+**Class**: `ChunkRetrieverService`
+
+Retrieves relevant chunks using semantic or keyword-based methods:
+
+- Primary: Semantic retrieval via vector store
+- Fallback: Keyword-based retrieval if vector store unavailable
+- Configurable similarity thresholds
+- Handles edge cases (empty queries, no results)
+
+### Benefits of Semantic Retrieval
+
+1. **Better Relevance**: Finds semantically similar content, not just keyword matches
+2. **Contextual Understanding**: Understands query intent beyond exact word matching
+3. **Reduced Noise**: Filters out irrelevant chunks that happen to contain query keywords
+4. **Improved Answers**: LLM receives more relevant context, producing better FAQs
+5. **Efficient**: Only most relevant chunks are passed to LLM, reducing token usage
+
+### Error Handling
+
+The semantic retrieval system includes robust error handling:
+
+- **Empty documents**: Returns empty results gracefully
+- **Empty queries**: Returns empty results without errors
+- **Missing vector index**: Falls back to keyword-based retrieval
+- **Embedding failures**: Catches and wraps exceptions with context
+- **No relevant chunks**: Returns empty results if threshold not met
 
 
 ## Project Structure
@@ -337,11 +464,15 @@ The test suite covers:
 
 - **Document Chunking**: Metadata preservation, chunk ID generation, heading detection
 - **FAQ Generation**: Source citation, answer generation, error handling
+- **Embeddings**: Vector generation, normalization, similarity
+- **Vector Store**: Indexing, searching, similarity thresholds, metadata preservation
 - **Chunk Retrieval**: Relevance ranking, top-K selection
-- **API Integration**: Request/response handling, error scenarios
+- **Chunk Retrieval**: Semantic retrieval, relevance ranking, top-K selection, fallback behavior
 - **Edge Cases**: Empty documents, missing metadata, malformed requests
 
 - **Configuration**: Add configuration files in `config/packages/`
+Run tests to verify semantic retrieval is working correctly.
+
 - **Routes**: Routes are configured via PHP attributes in controllers or in `config/routes.yaml`
 
 ### Environment Variables
@@ -358,10 +489,17 @@ The application follows a service-oriented architecture:
 
 #### Services (src/Service/)
 - `DocumentLoaderService`: Loads documents from files or text input
+
+**Core Services:**
 - `DocumentChunkerService`: Splits documents into semantic chunks
 - `ChunkRetrieverService`: Finds relevant chunks for questions
 - `FAQGeneratorService`: Generates FAQ answers with source citations
 
+
+**Semantic Retrieval Services:**
+- `EmbeddingServiceInterface`: Interface for embedding generation
+- `SimpleEmbeddingService`: Built-in embedding implementation
+- `VectorStore`: Vector storage and similarity search
 All services are autowired and can be injected into controllers or other services.
 
 The `.env` file contains default values and should be committed.

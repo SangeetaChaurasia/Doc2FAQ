@@ -5,6 +5,8 @@ namespace App\Controller;
 use App\Service\DocumentLoaderService;
 use App\Service\DocumentChunkerService;
 use App\Service\FAQGeneratorService;
+use App\Service\VectorStore;
+use App\Service\ChunkRetrieverService;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -15,7 +17,9 @@ class FAQController extends AbstractController
     public function __construct(
         private DocumentLoaderService $docLoader,
         private DocumentChunkerService $docChunker,
-        private FAQGeneratorService $faqGen
+        private FAQGeneratorService $faqGen,
+        private VectorStore $vectorStore,
+        private ChunkRetrieverService $retriever
     ) {}
 
     #[Route('/api/faq/generate', name: 'faq_generate_api', methods: ['POST'])]
@@ -37,8 +41,18 @@ class FAQController extends AbstractController
                 $docInfo['metadata']
             );
             
-            if (!$allChunks) {
+            if (empty($allChunks)) {
                 return $this->json(['error' => 'Chunking failed'], 400);
+            }
+            
+            // Index chunks in vector store for semantic retrieval
+            try {
+                $this->vectorStore->clear();
+                $this->vectorStore->indexChunks($allChunks);
+                $this->retriever->setVectorStore($this->vectorStore);
+            } catch (\Exception $e) {
+                // Continue with keyword-based retrieval if vector store fails
+                // Error is logged but doesn't block FAQ generation
             }
             
             $results = $this->faqGen->generateFAQs($allChunks, $qList);

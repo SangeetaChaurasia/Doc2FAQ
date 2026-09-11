@@ -3,6 +3,12 @@
 
 # Put parameters here that don't need to change on each machine where the app is deployed
 parameters:
+    # Semantic Retrieval Configuration
+    retrieval.embedding_model: 'simple'
+    retrieval.vector_store: 'memory'
+    retrieval.top_k: 3
+    retrieval.similarity_threshold: 0.0
+    retrieval.use_semantic: true
 
 services:
     # default configuration for services in *this* file
@@ -25,3 +31,21 @@ services:
     App\Controller\:
         resource: '../src/Controller/'
         tags: ['controller.service_arguments']
+
+    # Semantic Retrieval Services
+    App\Service\EmbeddingServiceInterface:
+        class: App\Service\SimpleEmbeddingService
+
+    App\Service\VectorStore:
+        arguments:
+            $embeddingService: '@App\Service\EmbeddingServiceInterface'
+
+    App\Service\ChunkRetrieverService:
+        arguments:
+            $similarityThreshold: '%retrieval.similarity_threshold%'
+            $useSemanticRetrieval: '%retrieval.use_semantic%'
+
+    App\Service\FAQGeneratorService:
+        arguments:
+            $topK: '%retrieval.top_k%'
+            $similarityThreshold: '%retrieval.similarity_threshold%'

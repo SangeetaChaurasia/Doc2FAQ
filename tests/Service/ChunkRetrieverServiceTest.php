@@ -4,15 +4,21 @@ namespace App\Tests\Service;
 
 use App\Model\DocumentChunk;
 use App\Service\ChunkRetrieverService;
+use App\Service\VectorStore;
+use App\Service\SimpleEmbeddingService;
 use PHPUnit\Framework\TestCase;
 
 class ChunkRetrieverServiceTest extends TestCase
 {
     private ChunkRetrieverService $service;
+    private VectorStore $vectorStore;
 
     protected function setUp(): void
     {
-        $this->service = new ChunkRetrieverService();
+        $embeddingService = new SimpleEmbeddingService();
+        $this->vectorStore = new VectorStore($embeddingService);
+        $this->service = new ChunkRetrieverService(0.0, false);
+        $this->service->setVectorStore($this->vectorStore);
     }
 
     public function testRetrievesRelevantChunks(): void
@@ -57,5 +63,69 @@ class ChunkRetrieverServiceTest extends TestCase
         $relevant = $this->service->findRelevantChunks($chunks, 'quick', 1);
         
         $this->assertEquals('c2', $relevant[0]->getChunkId());
+    }
+
+    public function testSemanticRetrievalWithVectorStore(): void
+    {
+        $service = new ChunkRetrieverService(0.0, true);
+        $service->setVectorStore($this->vectorStore);
+        
+        $chunks = [
+            new DocumentChunk('Python programming tutorial', 'c1', 'doc.txt'),
+            new DocumentChunk('Java programming guide', 'c2', 'doc.txt'),
+            new DocumentChunk('Cooking pasta recipe', 'c3', 'doc.txt'),
+        ];
+        
+        $this->vectorStore->indexChunks($chunks);
+        
+        $relevant = $service->findRelevantChunks($chunks, 'programming', 2);
+        
+        $this->assertCount(2, $relevant);
+    }
+
+    public function testRespectsSimilarityThreshold(): void
+    {
+        $service = new ChunkRetrieverService(0.3, true);
+        $service->setVectorStore($this->vectorStore);
+        
+        $chunks = [
+            new DocumentChunk('Machine learning algorithms', 'c1', 'doc.txt'),
+            new DocumentChunk('Deep learning networks', 'c2', 'doc.txt'),
+            new DocumentChunk('Cooking techniques', 'c3', 'doc.txt'),
+        ];
+        
+        $this->vectorStore->indexChunks($chunks);
+        
+        $relevant = $service->findRelevantChunks($chunks, 'learning', 10, 0.3);
+        
+        // Should filter out irrelevant chunks based on threshold
+        $this->assertLessThanOrEqual(2, count($relevant));
+    }
+
+    public function testFallsBackToKeywordRetrievalOnError(): void
+    {
+        // Don't set vector store - should fall back to keyword-based
+        $service = new ChunkRetrieverService(0.0, true);
+        
+        $chunks = [
+            new DocumentChunk('Information about dogs', 'c1', 'doc.txt'),
+            new DocumentChunk('Information about cats', 'c2', 'doc.txt'),
+        ];
+        
+        $relevant = $service->findRelevantChunks($chunks, 'dogs', 1);
+        
+        $this->assertCount(1, $relevant);
+        $this->assertEquals('c1', $relevant[0]->getChunkId());
+    }
+
+    public function testHandlesEmptyQuery(): void
+    {
+        $chunks = [
+            new DocumentChunk('Content', 'c1', 'doc.txt'),
+        ];
+        
+        $relevant = $this->service->findRelevantChunks($chunks, '', 5);
+        
+        $this->assertEmpty($relevant);
     }
 }
